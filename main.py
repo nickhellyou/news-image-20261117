@@ -1,41 +1,60 @@
 #!/usr/bin/env python3
-"""Deliver the finished front page for the news-image-20261117 bounty.
+"""Validate the bundled entry image and place a copy in the output folder.
 
-The picture itself is a fixed asset: a one-page newspaper that gathers the
-biggest stories of Tuesday 17 November 2026, from the Kerch Bridge
-collapse and the US-Iran strikes to Nvidia's record quarter and the
-rest of the 35-story front page. This script draws
-nothing and reaches no network; it simply places the finished page where
-the grader expects it, byte for byte, every time it runs.
+The program reads ``entry.png`` sitting next to this script, checks that it
+really is a PNG file, and writes an identical copy into the directory named
+by ``MAKEFUN_OUTPUT_DIR`` (``/output`` when the variable is unset).
 """
 
+import hashlib
 import os
+import sys
 from pathlib import Path
 
-SOURCE_NAME = "entry.png"
-CHUNK = 1 << 16
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+IMAGE_NAME = "entry.png"
+DEFAULT_OUTPUT_DIR = "/output"
+MAX_IMAGE_BYTES = 1_048_576  # 1 MiB; entry images are expected to stay below this
 
 
-def source_path():
-    return Path(__file__).resolve().parent / SOURCE_NAME
+def abort(message):
+    """Print an error to stderr and stop with a non-zero exit code."""
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(1)
 
 
-def destination():
-    raw = os.environ.get("MAKEFUN_OUTPUT_DIR") or "/output"
-    return Path(raw) / SOURCE_NAME
+def load_source_image(script_dir):
+    """Return the raw bytes of entry.png, or stop if it is missing/invalid."""
+    source = script_dir / IMAGE_NAME
+    if not source.is_file():
+        abort(f"missing input image: {source}")
+
+    payload = source.read_bytes()
+    if len(payload) > MAX_IMAGE_BYTES:
+        abort(
+            f"input image too large: {len(payload)} bytes "
+            f"(max {MAX_IMAGE_BYTES} bytes)"
+        )
+    if payload[: len(PNG_SIGNATURE)] != PNG_SIGNATURE:
+        abort("input is not a PNG file (bad magic bytes)")
+    return source, payload
 
 
-def place_page():
-    # Chunked copy keeps the bytes identical without loading the whole page.
-    target = destination()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with open(source_path(), "rb") as origin, open(target, "wb") as out:
-        while True:
-            piece = origin.read(CHUNK)
-            if not piece:
-                break
-            out.write(piece)
+def main():
+    script_dir = Path(__file__).resolve().parent
+    source, payload = load_source_image(script_dir)
+
+    out_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR") or DEFAULT_OUTPUT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    target = out_dir / IMAGE_NAME
+    target.write_bytes(payload)
+
+    digest = hashlib.sha256(payload).hexdigest()
+    print(f"wrote {target}")
+    print(f"sha256: {digest}")
+    print(f"bytes: {len(payload)}")
 
 
 if __name__ == "__main__":
-    place_page()
+    main()
